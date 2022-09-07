@@ -1,0 +1,76 @@
+﻿@page "/entity-selector"
+@inject HttpClient httpClient;
+
+<h3>EntitySelector</h3>
+@if (isLoading)
+{
+    <em>Loading</em>
+}
+else
+{
+<Column ColumnSize="ColumnSize.Is4.OnTablet.Is3.OnWidescreen.Is12.OnMobile">
+    <Text> Select which entities will be tracked</Text>
+    <Select Multiple="true" TValue="string" SelectedValuesChanged="@OnSelectedValuesChanged" SelectedValues="@selectedValues">
+        @foreach (var kvp in entities)
+        {
+            <SelectGroup Label="@kvp.Key">
+                @foreach (var entity in kvp.Value)
+                {
+                    <SelectItem Value="@($"{kvp.Key}.{entity}")">     @entity  </SelectItem>
+                }
+
+            </SelectGroup>
+        }
+
+    </Select>
+    <Text> @helperText</Text>
+    <Button Loading = "@saving" Disabled="@saving" Clicked="@OnButtonClicked">Save</Button>
+</Column>
+}
+@code {
+    bool isLoading;
+    string[] selectedValues;
+    string helperText;
+    bool saving = false;
+    //   string[] entities;
+    Dictionary<string, List<string>> entities;
+    protected async override Task OnInitializedAsync()
+    {
+        isLoading = true;
+        var rawEntities = await httpClient.GetFromJsonAsync<string[]>("api/entities?domains=light,switch");
+        entities = new Dictionary<string, List<string>>();
+        foreach (var ent in rawEntities)
+        {
+            var domain = ent.Split('.')[0];
+            var entity = ent.Split('.')[1];
+            if (!entities.ContainsKey(domain))
+            {
+                entities.Add(domain, new List<string>());
+            }
+            entities[domain].Add(entity);
+
+
+        }
+        isLoading = false;
+        await base.OnInitializedAsync();
+    }
+    void CheckedChanged (string entity)
+    {
+        Console.WriteLine(entity + " selected!");
+    }
+    void OnSelectedValuesChanged(IReadOnlyList<string> val)
+    {
+        var values = val.ToList();
+        helperText = $"{values.Count} item{(values.Count > 1 ? "s" : "")} selected";
+        selectedValues = val.ToArray();
+    }
+   async  Task OnButtonClicked()
+    {
+        saving = true;
+
+        await Task.Delay(5000);
+        
+        saving = false;
+
+    }
+}

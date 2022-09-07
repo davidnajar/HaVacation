@@ -1,0 +1,73 @@
+﻿@page "/"
+@inject HttpClient client;
+@inject NavigationManager navigationManager 
+@using Microsoft.AspNetCore.SignalR.Client
+<h3>Main</h3>
+
+@if (nextStates == null)
+{
+    <em>Loading...</em>
+}
+else
+{
+    <Text>Hub Connected: @IsConnected</Text>
+    <Heading Size="HeadingSize.Is4">
+        Last synchronization was @lastSync
+    </Heading>
+    <Heading Size="HeadingSize.Is4"> Next events: </Heading>
+    if (nextStates.Count == 0)
+    {
+        <Text >No state changes in the next 24 h</Text>
+    }
+    else
+    {
+
+        <Table>
+            <TableHeader>
+                <TableRow>
+                    <TableHeaderCell>Time</TableHeaderCell>
+                    <TableHeaderCell>Entity</TableHeaderCell>
+                    <TableHeaderCell>Next State</TableHeaderCell>
+
+                </TableRow>
+            </TableHeader>
+            <TableBody>
+                @foreach (var s in nextStates)
+                {
+                    <TableRow>
+
+                        <TableRowCell>@s.LastChanged</TableRowCell>
+                        <TableRowCell>@s.EntityId</TableRowCell>
+                        <TableRowCell>@s.State</TableRowCell>
+                    </TableRow>
+                }
+
+
+            </TableBody>
+        </Table>
+    }
+}
+
+@code {
+    DateTimeOffset lastSync;
+    List<StateObjectDto> nextStates;
+    private HubConnection hubConnection;
+    public bool IsConnected =>
+hubConnection.State == HubConnectionState.Connected;
+
+    protected async override Task OnInitializedAsync()
+    {
+        var nextChanges = await client.GetFromJsonAsync<List<StateObjectDto>>("api/queue");
+        var appState = await client.GetFromJsonAsync<ApplicationStateDto>("api/appstate");
+        lastSync = appState.LastTimeChecked;
+        nextStates = nextChanges;
+        hubConnection = (new HubConnectionBuilder())
+             .WithUrl(navigationManager.ToAbsoluteUri("/hubs/appstate"))
+             .WithAutomaticReconnect()
+        .Build();
+
+        await base.OnInitializedAsync();
+
+
+    }
+}
