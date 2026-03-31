@@ -1,0 +1,51 @@
+---
+name: "HaVacation"
+description: >-
+  Makes your home look occupied while you're away by replaying the previous
+  week's entity history through Home Assistant, with a random jitter so the
+  pattern is never perfectly identical.
+version: "1.0.0"
+slug: "havacation"
+url: "https://github.com/davidnajar/HaVacation"
+
+# Pre-built multi-arch image published to GHCR.
+# The Supervisor appends :{version} when pulling, so the tag "1.0.0" must
+# exist in the registry (created by the docker-publish GitHub Actions workflow
+# when a git tag v1.0.0 is pushed).
+image: "ghcr.io/davidnajar/havacation"
+
+arch:
+  - amd64
+  - aarch64
+
+# Supervisor should NOT run the S6-overlay init system; the image has its own
+# entrypoint (docker-entrypoint.sh).
+init: false
+
+# Ports exposed to the host (optional – only needed if you want to reach the
+# Blazor UI from outside the add-on network).
+ports:
+  8080/tcp: 8080
+ports_description:
+  8080/tcp: "HaVacation Blazor web UI"
+
+# ── Add-on options ─────────────────────────────────────────────────────────────
+options:
+  homeassistant_url: "http://homeassistant.local:8123"
+  homeassistant_token: ""
+  vacation_enabled: false
+  lookback_days: 7
+  random_jitter_seconds: 120
+  entities: []
+
+schema:
+  homeassistant_url: str
+  homeassistant_token: str
+  vacation_enabled: bool
+  lookback_days: int
+  random_jitter_seconds: int
+  entities:
+    - str
+
+# Minimum required HA version.
+homeassistant: "2023.1"
