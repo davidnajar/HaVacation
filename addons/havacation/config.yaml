@@ -22,12 +22,17 @@ arch:
 # entrypoint (docker-entrypoint.sh).
 init: false
 
+# Ingress – enables the "Open Web UI" button in Home Assistant and proxies
+# traffic through the Supervisor without exposing an extra host port.
+ingress: true
+ingress_port: 8080
+
 # Ports exposed to the host (optional – only needed if you want to reach the
-# Blazor UI from outside the add-on network).
+# Blazor UI directly, outside of the HA ingress proxy).
 ports:
-  8080/tcp: 8080
+  8080/tcp: null
 ports_description:
-  8080/tcp: "HaVacation Blazor web UI"
+  8080/tcp: "HaVacation Blazor web UI (direct access, optional)"
 
 # ── Add-on options ─────────────────────────────────────────────────────────────
 options:
