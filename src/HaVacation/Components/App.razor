@@ -1,8 +1,11 @@
+@inject IHttpContextAccessor HttpContextAccessor
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="@((HttpContextAccessor.HttpContext?.Request.PathBase.Value ?? string.Empty).TrimEnd('/') + "/")" />
     <title>HaVacation</title>
     <link rel="stylesheet" href="app.css" />
     <HeadOutlet />
