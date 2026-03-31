@@ -1,7 +1,8 @@
+using HaVacation.Components;
 using HaVacation.Models;
 using HaVacation.Services;
 
-var builder = Host.CreateApplicationBuilder(args);
+var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.Configure<HomeAssistantConfig>(
     builder.Configuration.GetSection("HomeAssistant"));
@@ -14,5 +15,22 @@ builder.Services.AddHttpClient<HomeAssistantClient>();
 
 builder.Services.AddHostedService<VacationWorker>();
 
-var host = builder.Build();
-host.Run();
+builder.Services.AddSingleton<ConfigurationService>();
+
+builder.Services.AddRazorComponents()
+    .AddInteractiveServerComponents();
+
+var app = builder.Build();
+
+if (!app.Environment.IsDevelopment())
+{
+    app.UseExceptionHandler("/Error");
+}
+
+app.UseStaticFiles();
+app.UseAntiforgery();
+
+app.MapRazorComponents<App>()
+    .AddInteractiveServerRenderMode();
+
+app.Run();

@@ -4,9 +4,11 @@ services:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
-    # Mount your local appsettings.json so you can edit it without rebuilding.
+    ports:
+      - "8080:8080"
+    # Mount your local appsettings.json so changes made via the UI persist on the host.
     volumes:
-      - ./appsettings.json:/app/appsettings.json:ro
+      - ./appsettings.json:/app/appsettings.json
     # Alternatively, override individual settings with environment variables:
     # environment:
     #   - HomeAssistant__Url=http://homeassistant.local:8123
