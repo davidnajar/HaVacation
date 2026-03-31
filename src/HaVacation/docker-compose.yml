@@ -1,0 +1,16 @@
+services:
+  havacation:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    # Mount your local appsettings.json so you can edit it without rebuilding.
+    volumes:
+      - ./appsettings.json:/app/appsettings.json:ro
+    # Alternatively, override individual settings with environment variables:
+    # environment:
+    #   - HomeAssistant__Url=http://homeassistant.local:8123
+    #   - HomeAssistant__Token=your_token_here
+    #   - Vacation__Enabled=true
+    #   - Vacation__Entities__0=light.living_room
+    #   - Vacation__Entities__1=cover.living_room_blind
