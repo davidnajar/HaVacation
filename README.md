@@ -13,9 +13,72 @@ Supported entity domains: `light`, `cover`, `media_player`, `switch`, `input_boo
 
 ---
 
-## Quick start
+## Installation
 
-### Option A – Docker Compose (recommended)
+### Option A – Home Assistant Add-on (recommended)
+
+HaVacation ships as a Home Assistant Supervisor add-on.  
+No extra server is required — the add-on runs as a container inside your HA instance.
+
+**Prerequisites:** Home Assistant OS or Home Assistant Supervised.
+
+**Steps:**
+
+1. **Add the custom repository** in HA:  
+   *Settings → Add-ons → Add-on Store → ⋮ → Repositories*  
+   Paste: `https://github.com/davidnajar/HaVacation`
+
+2. **Refresh** the store and locate **HaVacation** in the list.
+
+3. **Install** the add-on and open its *Configuration* tab.
+
+4. Fill in the options:
+
+   | Option | Description |
+   |---|---|
+   | `homeassistant_url` | Full URL of your HA instance, e.g. `http://homeassistant.local:8123` |
+   | `homeassistant_token` | Long-lived access token (*Profile → Long-Lived Access Tokens*) |
+   | `vacation_enabled` | `true` when you leave, `false` when you return |
+   | `lookback_days` | Days to look back for the reference pattern (default `7` = same weekday) |
+   | `random_jitter_seconds` | Maximum random offset per event in seconds (default `120` = ±2 min) |
+   | `entities` | List of entity IDs to replay, e.g. `light.living_room` |
+
+5. **Start** the add-on.  The Blazor web UI is available on port **8080** of your HA host.
+
+---
+
+### Option B – Pre-built Docker image from GHCR
+
+The image is published to GitHub Container Registry on every commit to `main`
+and for every version tag (e.g. `v1.2.3`).
+
+```bash
+docker run -d \
+  --name havacation \
+  --restart unless-stopped \
+  -p 8080:8080 \
+  -e HomeAssistant__Url=http://homeassistant.local:8123 \
+  -e HomeAssistant__Token=YOUR_LONG_LIVED_ACCESS_TOKEN \
+  -e Vacation__Enabled=true \
+  -e Vacation__Entities__0=light.living_room \
+  -e Vacation__Entities__1=cover.living_room_blind \
+  ghcr.io/davidnajar/havacation:latest
+```
+
+Or with a persisted `appsettings.json`:
+
+```bash
+docker run -d \
+  --name havacation \
+  --restart unless-stopped \
+  -p 8080:8080 \
+  -v $(pwd)/appsettings.json:/app/appsettings.json \
+  ghcr.io/davidnajar/havacation:latest
+```
+
+---
+
+### Option C – Docker Compose (build from source)
 
 ```bash
 # 1. Clone the repo
@@ -25,21 +88,20 @@ cd HaVacation/src/HaVacation
 # 2. Edit appsettings.json with your HA URL, token, and entity list
 #    (see Configuration section below)
 
-# 3. Enable vacation mode
-#    Set "Enabled": true in appsettings.json
-
-# 4. Build and run
+# 3. Build and run
 docker compose up -d
 ```
 
-### Option B – dotnet run
+---
+
+### Option D – dotnet run
 
 ```bash
 cd HaVacation/src/HaVacation
 dotnet run
 ```
 
-### Option C – run as a systemd service
+### Option E – systemd service
 
 ```bash
 dotnet publish -c Release -o /opt/havacation
