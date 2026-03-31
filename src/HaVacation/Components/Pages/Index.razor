@@ -1,0 +1,198 @@
+@page "/"
+@rendermode InteractiveServer
+@inject ConfigurationService ConfigSvc
+
+<PageTitle>HaVacation – Configuration</PageTitle>
+
+<h1>Vacation Mode Configuration</h1>
+
+@if (_successMessage is not null)
+{
+    <div class="alert alert-success" role="alert">@_successMessage</div>
+}
+
+@if (_errorMessage is not null)
+{
+    <div class="alert alert-error" role="alert">@_errorMessage</div>
+}
+
+<!-- ── Vacation toggle ────────────────────────────────────────────────────── -->
+<div class="card">
+    <div class="card-header">
+        <h2>Vacation Mode</h2>
+        <span class="badge @(_vacation.Enabled ? "badge-active" : "badge-inactive")">
+            @(_vacation.Enabled ? "Active" : "Inactive")
+        </span>
+    </div>
+    <p>Enable vacation mode to replay your home's historical activity patterns, making the house look occupied.</p>
+    <label class="toggle-label">
+        <input class="toggle-input" type="checkbox" @bind="_vacation.Enabled" />
+        <span class="toggle-track">
+            <span class="toggle-thumb"></span>
+        </span>
+        <span>@(_vacation.Enabled ? "Vacation mode is ON" : "Vacation mode is OFF")</span>
+    </label>
+</div>
+
+<!-- ── Home Assistant connection ─────────────────────────────────────────── -->
+<div class="card">
+    <div class="card-header">
+        <h2>Home Assistant Connection</h2>
+    </div>
+    <div class="form-group">
+        <label for="ha-url">Instance URL</label>
+        <input id="ha-url" type="url" class="form-control"
+               placeholder="http://homeassistant.local:8123"
+               @bind="_ha.Url" />
+        <span class="hint">Full URL of your Home Assistant instance (no trailing slash).</span>
+    </div>
+    <div class="form-group">
+        <label for="ha-token">Long-Lived Access Token</label>
+        <input id="ha-token" type="password" class="form-control"
+               placeholder="Paste your token here"
+               @bind="_ha.Token" />
+        <span class="hint">
+            Generate a token in Home Assistant under
+            <em>Profile → Security → Long-Lived Access Tokens</em>.
+        </span>
+    </div>
+</div>
+
+<!-- ── Replay settings ───────────────────────────────────────────────────── -->
+<div class="card">
+    <div class="card-header">
+        <h2>Replay Settings</h2>
+    </div>
+    <div class="form-row">
+        <div class="form-group">
+            <label for="lookback">Lookback Days</label>
+            <input id="lookback" type="number" class="form-control form-control-sm"
+                   min="1" max="365"
+                   @bind="_vacation.LookbackDays" />
+            <span class="hint">Days back to use as the reference pattern (7 = same weekday).</span>
+        </div>
+        <div class="form-group">
+            <label for="jitter">Random Jitter (seconds)</label>
+            <input id="jitter" type="number" class="form-control form-control-sm"
+                   min="0" max="3600"
+                   @bind="_vacation.RandomJitterSeconds" />
+            <span class="hint">
+                Each event is shifted by a random offset (±N seconds) so the
+                pattern is never perfectly identical.
+            </span>
+        </div>
+    </div>
+</div>
+
+<!-- ── Entities ──────────────────────────────────────────────────────────── -->
+<div class="card">
+    <div class="card-header">
+        <h2>Entities</h2>
+    </div>
+    <p>
+        List the Home Assistant entity IDs to monitor and replay.
+        Supported domains: <code>light</code>, <code>cover</code>,
+        <code>media_player</code>, <code>switch</code>,
+        <code>input_boolean</code>, <code>fan</code>.
+    </p>
+
+    @for (var i = 0; i < _vacation.Entities.Count; i++)
+    {
+        var index = i;
+        <div class="entity-row" @key="(_vacation.Entities[index], index)">
+            <input type="text" class="form-control"
+                   value="@_vacation.Entities[index]"
+                   placeholder="e.g. light.living_room"
+                   @onchange="e => UpdateEntity(index, e.Value?.ToString() ?? string.Empty)" />
+            <button class="btn btn-remove" type="button"
+                    title="Remove entity"
+                    @onclick="() => RemoveEntity(index)">✕</button>
+        </div>
+    }
+
+    <div class="entity-row entity-add-row">
+        <input type="text" class="form-control"
+               placeholder="Add entity ID, e.g. light.bedroom"
+               @bind="_newEntityId"
+               @onkeydown="OnNewEntityKeyDown" />
+        <button class="btn btn-add" type="button" @onclick="AddEntity">+ Add</button>
+    </div>
+</div>
+
+<!-- ── Actions ───────────────────────────────────────────────────────────── -->
+<div class="actions">
+    <button class="btn btn-save" type="button" @onclick="SaveAsync" disabled="@_saving">
+        @if (_saving)
+        {
+            <span>Saving…</span>
+        }
+        else
+        {
+            <span>Save Configuration</span>
+        }
+    </button>
+</div>
+
+@code {
+    private HomeAssistantConfig _ha      = new();
+    private VacationConfig      _vacation = new();
+    private string?             _newEntityId;
+    private string?             _successMessage;
+    private string?             _errorMessage;
+    private bool                _saving;
+
+    protected override void OnInitialized()
+    {
+        _ha       = ConfigSvc.GetHomeAssistantConfig();
+        _vacation = ConfigSvc.GetVacationConfig();
+    }
+
+    private void UpdateEntity(int index, string value)
+    {
+        if (index >= 0 && index < _vacation.Entities.Count)
+            _vacation.Entities[index] = value;
+    }
+
+    private void RemoveEntity(int index)
+    {
+        if (index >= 0 && index < _vacation.Entities.Count)
+            _vacation.Entities.RemoveAt(index);
+    }
+
+    private void AddEntity()
+    {
+        var id = _newEntityId?.Trim();
+        if (!string.IsNullOrWhiteSpace(id))
+        {
+            _vacation.Entities.Add(id);
+            _newEntityId = string.Empty;
+        }
+    }
+
+    private void OnNewEntityKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+            AddEntity();
+    }
+
+    private async Task SaveAsync()
+    {
+        _saving         = true;
+        _successMessage = null;
+        _errorMessage   = null;
+
+        try
+        {
+            await ConfigSvc.SaveAsync(_ha, _vacation);
+            _successMessage = "Configuration saved. The worker will reload the schedule at midnight (or immediately if vacation mode was just enabled).";
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Failed to save configuration: {ex.Message}";
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}
