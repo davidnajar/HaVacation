@@ -4,7 +4,7 @@ description: >-
   Makes your home look occupied while you're away by replaying the previous
   week's entity history through Home Assistant, with a random jitter so the
   pattern is never perfectly identical.
-version: "latest"
+version: "v26.04.0"
 slug: "havacation"
 url: "https://github.com/davidnajar/HaVacation"
 
