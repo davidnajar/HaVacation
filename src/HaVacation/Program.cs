@@ -16,9 +16,12 @@ builder.Services.AddHttpClient<HomeAssistantClient>();
 // Required so App.razor can read HttpContext.Request.PathBase for the <base href>.
 builder.Services.AddHttpContextAccessor();
 
-builder.Services.AddHostedService<VacationWorker>();
-
 builder.Services.AddSingleton<ConfigurationService>();
+
+// Register VacationWorker as a singleton first so Blazor pages can inject it,
+// then wire the same instance up as the hosted background service.
+builder.Services.AddSingleton<VacationWorker>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<VacationWorker>());
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();

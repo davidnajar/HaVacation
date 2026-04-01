@@ -4,6 +4,29 @@ using System.Text.Json.Serialization;
 namespace HaVacation.Models;
 
 /// <summary>
+/// Minimal HA state entry used for entity discovery (GET /api/states).
+/// </summary>
+public sealed class HaStateEntry
+{
+    [JsonPropertyName("entity_id")]
+    public string EntityId { get; set; } = "";
+
+    [JsonPropertyName("attributes")]
+    public JsonElement Attributes { get; set; }
+
+    /// <summary>Returns the friendly_name attribute, falling back to the entity ID.</summary>
+    public string FriendlyName =>
+        Attributes.ValueKind == JsonValueKind.Object &&
+        Attributes.TryGetProperty("friendly_name", out var fn) &&
+        fn.ValueKind == JsonValueKind.String
+            ? fn.GetString() ?? EntityId
+            : EntityId;
+}
+
+/// <summary>A Home Assistant entity available for monitoring.</summary>
+public sealed record HaEntityInfo(string EntityId, string FriendlyName);
+
+/// <summary>
 /// A single entity-state snapshot returned by the HA history API.
 /// </summary>
 public sealed class EntityStateEntry
