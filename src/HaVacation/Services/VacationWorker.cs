@@ -29,6 +29,10 @@ public sealed class VacationWorker : BackgroundService
     // lock-free access from the single worker loop.
     private readonly ConcurrentQueue<ScheduledReplay> _queue = new();
 
+    // Set to 1 via Interlocked when the UI requests an immediate reschedule.
+    private int  _rescheduleRequested;
+    private long _scheduleVersion;
+
     private readonly HomeAssistantClient _ha;
     private readonly IOptionsMonitor<VacationConfig> _vacationCfg;
     private readonly ILogger<VacationWorker> _log;
@@ -57,8 +61,14 @@ public sealed class VacationWorker : BackgroundService
         {
             var now = DateTimeOffset.Now;
 
+            // Honour a manual reschedule request from the UI.
+            if (Interlocked.CompareExchange(ref _rescheduleRequested, 0, 1) == 1)
+            {
+                lastScheduleDate = now.Date;
+                await LoadScheduleForTodayAsync(ct);
+            }
             // Refresh the schedule at midnight for the new day.
-            if (now.Date != lastScheduleDate)
+            else if (now.Date != lastScheduleDate)
             {
                 lastScheduleDate = now.Date;
                 await LoadScheduleForTodayAsync(ct);
@@ -70,6 +80,31 @@ public sealed class VacationWorker : BackgroundService
             await Task.Delay(TimeSpan.FromSeconds(1), ct);
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Public API (used by the Blazor UI)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Signals the worker to rebuild today's schedule on the next tick.
+    /// Safe to call from any thread.
+    /// </summary>
+    public void RequestReschedule() =>
+        Interlocked.Exchange(ref _rescheduleRequested, 1);
+
+    /// <summary>
+    /// A monotonically increasing counter that the worker increments every time
+    /// <see cref="LoadScheduleForTodayAsync"/> completes. The UI can poll this
+    /// value to detect when a force-reschedule has been processed.
+    /// </summary>
+    public long ScheduleVersion => Interlocked.Read(ref _scheduleVersion);
+
+    /// <summary>
+    /// Returns a snapshot of the currently queued replay events, sorted by
+    /// <see cref="ScheduledReplay.FireAt"/>. Safe to call from any thread.
+    /// </summary>
+    public IReadOnlyList<ScheduledReplay> PeekSchedule() =>
+        [.. _queue.OrderBy(r => r.FireAt)];
 
     // -------------------------------------------------------------------------
     // Schedule loading
@@ -87,12 +122,14 @@ public sealed class VacationWorker : BackgroundService
         {
             _log.LogInformation("Vacation mode is disabled – no schedule loaded.");
             ClearQueue();
+            Interlocked.Increment(ref _scheduleVersion);
             return;
         }
 
         if (cfg.Entities.Count == 0)
         {
             _log.LogWarning("Vacation mode is enabled but no entities are configured.");
+            Interlocked.Increment(ref _scheduleVersion);
             return;
         }
 
@@ -114,6 +151,7 @@ public sealed class VacationWorker : BackgroundService
         catch (Exception ex)
         {
             _log.LogError(ex, "Failed to fetch history from Home Assistant.");
+            Interlocked.Increment(ref _scheduleVersion);
             return;
         }
 
@@ -151,6 +189,8 @@ public sealed class VacationWorker : BackgroundService
             "Schedule loaded: {Scheduled} events queued ({Skipped} past events skipped).",
             count,
             history.Count - count);
+
+        Interlocked.Increment(ref _scheduleVersion);
     }
 
     // -------------------------------------------------------------------------

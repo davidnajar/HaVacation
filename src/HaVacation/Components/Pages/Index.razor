@@ -1,6 +1,8 @@
 @page "/"
 @rendermode InteractiveServer
 @inject ConfigurationService ConfigSvc
+@inject VacationWorker Worker
+@inject HomeAssistantClient HaClient
 
 <PageTitle>HaVacation – Configuration</PageTitle>
 
@@ -90,7 +92,7 @@
         <h2>Entities</h2>
     </div>
     <p>
-        List the Home Assistant entity IDs to monitor and replay.
+        Select the Home Assistant entities to monitor and replay.
         Supported domains: <code>light</code>, <code>cover</code>,
         <code>media_player</code>, <code>switch</code>,
         <code>input_boolean</code>, <code>fan</code>.
@@ -110,13 +112,154 @@
         </div>
     }
 
+    <!-- Manual add row -->
     <div class="entity-row entity-add-row">
         <input type="text" class="form-control"
-               placeholder="Add entity ID, e.g. light.bedroom"
+               placeholder="Add entity ID manually, e.g. light.bedroom"
                @bind="_newEntityId"
                @onkeydown="OnNewEntityKeyDown" />
         <button class="btn btn-add" type="button" @onclick="AddEntity">+ Add</button>
     </div>
+
+    <!-- Entity picker from HA -->
+    <div class="entity-picker-section">
+        <button class="btn btn-secondary" type="button" @onclick="TogglePickerAsync"
+                disabled="@_pickerLoading">
+            @if (_pickerLoading)
+            {
+                <span class="spinner"></span><span>Loading entities…</span>
+            }
+            else if (_showPicker)
+            {
+                <span>▲ Hide entity browser</span>
+            }
+            else
+            {
+                <span>🔍 Browse HA entities</span>
+            }
+        </button>
+
+        @if (_showPicker)
+        {
+            <div class="entity-picker">
+                <div class="entity-picker-header">
+                    <input type="search" class="form-control"
+                           placeholder="Filter by ID or name…"
+                           @bind="_pickerFilter"
+                           @bind:event="oninput" />
+                    <button class="btn btn-remove" type="button"
+                            title="Close" @onclick="ClosePicker">✕</button>
+                </div>
+
+                @if (_pickerError is not null)
+                {
+                    <div class="alert alert-error" style="margin:.5rem 0">@_pickerError</div>
+                }
+                else
+                {
+                    var filtered = FilteredPickerEntities;
+                    @if (filtered.Count == 0)
+                    {
+                        <p class="picker-empty">No matching entities found.</p>
+                    }
+                    else
+                    {
+                        <ul class="picker-list">
+                            @foreach (var entity in filtered)
+                            {
+                                var alreadyAdded = _vacation.Entities.Contains(entity.EntityId);
+                                <li class="picker-item @(alreadyAdded ? "picker-item-added" : "")"
+                                    @key="entity.EntityId">
+                                    <div class="picker-item-info">
+                                        <span class="picker-entity-id">@entity.EntityId</span>
+                                        @if (entity.FriendlyName != entity.EntityId)
+                                        {
+                                            <span class="picker-friendly-name">@entity.FriendlyName</span>
+                                        }
+                                    </div>
+                                    @if (alreadyAdded)
+                                    {
+                                        <button class="btn btn-remove btn-sm" type="button"
+                                                title="Remove"
+                                                @onclick="() => RemoveEntityById(entity.EntityId)">✕</button>
+                                    }
+                                    else
+                                    {
+                                        <button class="btn btn-add btn-sm" type="button"
+                                                title="Add"
+                                                @onclick="() => AddEntityFromPicker(entity.EntityId)">+ Add</button>
+                                    }
+                                </li>
+                            }
+                        </ul>
+                    }
+                }
+            </div>
+        }
+    </div>
+</div>
+
+<!-- ── Today's schedule / plan ───────────────────────────────────────────── -->
+<div class="card">
+    <div class="card-header">
+        <h2>Today's Schedule</h2>
+        <button class="btn btn-reschedule" type="button"
+                @onclick="ForceRescheduleAsync"
+                disabled="@_rescheduling"
+                title="Force recalculation of today's schedule">
+            @if (_rescheduling)
+            {
+                <span class="spinner"></span><span>Rescheduling…</span>
+            }
+            else
+            {
+                <span>🔄 Force Reschedule</span>
+            }
+        </button>
+    </div>
+    <p>
+        What the app will do today, based on activity recorded
+        @(_vacation.LookbackDays) day@(_vacation.LookbackDays == 1 ? "" : "s") ago.
+        Events already fired are not shown.
+    </p>
+
+    @if (!_vacation.Enabled)
+    {
+        <div class="schedule-empty">Vacation mode is disabled. Enable it to see today's plan.</div>
+    }
+    else if (_schedule.Count == 0)
+    {
+        <div class="schedule-empty">
+            No upcoming events queued. The schedule is built at startup and at midnight.
+            Use <strong>Force Reschedule</strong> to rebuild it now.
+        </div>
+    }
+    else
+    {
+        <div class="schedule-table-wrap">
+            <table class="schedule-table">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Entity</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var ev in _schedule)
+                    {
+                        <tr @key="@(ev.EntityId + ev.FireAt.Ticks)">
+                            <td class="schedule-time">@ev.FireAt.ToLocalTime().ToString("HH:mm:ss")</td>
+                            <td class="schedule-entity">@ev.EntityId</td>
+                            <td class="schedule-state @(ev.State is "on" or "open" ? "state-on" : "state-off")">
+                                @ev.State
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
 </div>
 
 <!-- ── Actions ───────────────────────────────────────────────────────────── -->
@@ -134,18 +277,49 @@
 </div>
 
 @code {
-    private HomeAssistantConfig _ha      = new();
+    private HomeAssistantConfig _ha       = new();
     private VacationConfig      _vacation = new();
     private string?             _newEntityId;
     private string?             _successMessage;
     private string?             _errorMessage;
     private bool                _saving;
 
+    // Entity picker
+    private bool               _showPicker;
+    private bool               _pickerLoading;
+    private string?            _pickerError;
+    private string             _pickerFilter      = string.Empty;
+    private List<HaEntityInfo> _availableEntities = [];
+
+    // Schedule
+    private List<ScheduledReplay> _schedule     = [];
+    private bool                  _rescheduling;
+
+    private List<HaEntityInfo> FilteredPickerEntities
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(_pickerFilter))
+                return _availableEntities;
+            var f = _pickerFilter.Trim();
+            return _availableEntities
+                .Where(e => e.EntityId.Contains(f, StringComparison.OrdinalIgnoreCase)
+                         || e.FriendlyName.Contains(f, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+    }
+
     protected override void OnInitialized()
     {
         _ha       = ConfigSvc.GetHomeAssistantConfig();
         _vacation = ConfigSvc.GetVacationConfig();
+        RefreshSchedule();
     }
+
+    private void RefreshSchedule() =>
+        _schedule = [.. Worker.PeekSchedule()];
+
+    // ── Entity editing ────────────────────────────────────────────────────────
 
     private void UpdateEntity(int index, string value)
     {
@@ -158,6 +332,9 @@
         if (index >= 0 && index < _vacation.Entities.Count)
             _vacation.Entities.RemoveAt(index);
     }
+
+    private void RemoveEntityById(string entityId) =>
+        _vacation.Entities.Remove(entityId);
 
     private void AddEntity()
     {
@@ -174,6 +351,76 @@
         if (e.Key == "Enter")
             AddEntity();
     }
+
+    private void AddEntityFromPicker(string entityId)
+    {
+        if (!_vacation.Entities.Contains(entityId))
+            _vacation.Entities.Add(entityId);
+    }
+
+    // ── Entity picker ─────────────────────────────────────────────────────────
+
+    private async Task TogglePickerAsync()
+    {
+        if (_showPicker)
+        {
+            ClosePicker();
+            return;
+        }
+
+        _pickerLoading = true;
+        _pickerError   = null;
+        StateHasChanged();
+
+        try
+        {
+            _availableEntities = await HaClient.GetEntitiesAsync();
+            _showPicker        = true;
+        }
+        catch (Exception ex)
+        {
+            _pickerError = $"Failed to load entities from Home Assistant: {ex.Message}";
+            _showPicker  = true;
+        }
+        finally
+        {
+            _pickerLoading = false;
+        }
+    }
+
+    private void ClosePicker()
+    {
+        _showPicker   = false;
+        _pickerFilter = string.Empty;
+    }
+
+    // ── Force reschedule ──────────────────────────────────────────────────────
+
+    private async Task ForceRescheduleAsync()
+    {
+        _rescheduling = true;
+        StateHasChanged();
+
+        try
+        {
+            var versionBefore = Worker.ScheduleVersion;
+            Worker.RequestReschedule();
+
+            // Poll until the worker increments the version (i.e. rebuild is done),
+            // with a 15-second timeout to cover slow HA history fetches.
+            var deadline = DateTimeOffset.Now.AddSeconds(15);
+            while (Worker.ScheduleVersion == versionBefore && DateTimeOffset.Now < deadline)
+                await Task.Delay(TimeSpan.FromMilliseconds(250));
+
+            RefreshSchedule();
+        }
+        finally
+        {
+            _rescheduling = false;
+        }
+    }
+
+    // ── Save ──────────────────────────────────────────────────────────────────
 
     private async Task SaveAsync()
     {

@@ -34,6 +34,34 @@ public sealed class HomeAssistantClient
         _log    = log;
     }
 
+    private static readonly string[] SupportedDomains =
+        ["light", "cover", "media_player", "switch", "input_boolean", "fan"];
+
+    // -------------------------------------------------------------------------
+    // Entity discovery
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Returns all HA entities whose domain is supported by vacation mode,
+    /// sorted by entity ID. Used to populate the entity picker in the UI.
+    /// </summary>
+    public async Task<List<HaEntityInfo>> GetEntitiesAsync(CancellationToken ct = default)
+    {
+        ConfigureHttpClient();
+
+        var response = await _http.GetAsync("api/states", ct);
+        response.EnsureSuccessStatusCode();
+
+        var json   = await response.Content.ReadAsStringAsync(ct);
+        var states = JsonSerializer.Deserialize<List<HaStateEntry>>(json, _jsonOpts) ?? [];
+
+        return [.. states
+            .Where(s => s.EntityId.Contains('.') &&
+                        SupportedDomains.Contains(s.EntityId.Split('.')[0]))
+            .Select(s => new HaEntityInfo(s.EntityId, s.FriendlyName))
+            .OrderBy(e => e.EntityId)];
+    }
+
     // -------------------------------------------------------------------------
     // History
     // -------------------------------------------------------------------------

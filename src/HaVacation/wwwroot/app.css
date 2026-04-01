@@ -324,3 +324,192 @@ h1 {
 
 .btn-save:hover:not(:disabled) { background: var(--color-primary-h); }
 .btn-save:disabled { opacity: .6; cursor: not-allowed; }
+
+/* ── Secondary button ──────────────────────────────────────────────── */
+.btn-secondary {
+    background: var(--color-surface);
+    color: var(--color-primary);
+    border: 1px solid var(--color-primary);
+    padding: .45rem .9rem;
+}
+
+.btn-secondary:hover:not(:disabled) { background: #eff6ff; }
+.btn-secondary:disabled { opacity: .6; cursor: not-allowed; }
+
+/* ── Small button variant ──────────────────────────────────────────── */
+.btn-sm {
+    padding: .3rem .6rem;
+    font-size: .8rem;
+}
+
+/* ── Reschedule button ─────────────────────────────────────────────── */
+.btn-reschedule {
+    background: var(--color-surface);
+    color: var(--color-primary);
+    border: 1px solid var(--color-primary);
+    padding: .35rem .85rem;
+    font-size: .85rem;
+    border-radius: var(--radius);
+    display: inline-flex;
+    align-items: center;
+    gap: .4rem;
+    margin-left: auto;
+    cursor: pointer;
+    font-weight: 600;
+    transition: background .15s;
+}
+
+.btn-reschedule:hover:not(:disabled) { background: #eff6ff; }
+.btn-reschedule:disabled { opacity: .6; cursor: not-allowed; }
+
+/* ── Loading spinner ───────────────────────────────────────────────── */
+.spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid currentColor;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+    flex-shrink: 0;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Entity picker section ─────────────────────────────────────────── */
+.entity-picker-section {
+    margin-top: .75rem;
+}
+
+.entity-picker {
+    margin-top: .5rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    background: var(--color-surface);
+    overflow: hidden;
+}
+
+.entity-picker-header {
+    display: flex;
+    gap: .5rem;
+    align-items: center;
+    padding: .5rem .75rem;
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-bg);
+}
+
+.entity-picker-header .form-control {
+    flex: 1;
+    margin: 0;
+}
+
+.picker-list {
+    list-style: none;
+    max-height: 260px;
+    overflow-y: auto;
+}
+
+.picker-item {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    padding: .45rem .75rem;
+    border-bottom: 1px solid var(--color-border);
+    transition: background .1s;
+}
+
+.picker-item:last-child { border-bottom: none; }
+.picker-item:hover { background: #f8fafc; }
+.picker-item-added { background: #f0fdf4; }
+.picker-item-added:hover { background: #dcfce7; }
+
+.picker-item-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: .1rem;
+}
+
+.picker-entity-id {
+    font-size: .85rem;
+    font-family: ui-monospace, monospace;
+    color: var(--color-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.picker-friendly-name {
+    font-size: .75rem;
+    color: var(--color-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.picker-empty {
+    padding: 1rem .75rem;
+    font-size: .875rem;
+    color: var(--color-muted);
+    text-align: center;
+}
+
+/* ── Schedule table ────────────────────────────────────────────────── */
+.schedule-empty {
+    font-size: .875rem;
+    color: var(--color-muted);
+    padding: .5rem 0;
+}
+
+.schedule-table-wrap {
+    overflow-x: auto;
+    margin-top: .25rem;
+}
+
+.schedule-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: .875rem;
+}
+
+.schedule-table th {
+    text-align: left;
+    padding: .4rem .6rem;
+    font-size: .75rem;
+    font-weight: 600;
+    color: var(--color-muted);
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    border-bottom: 1px solid var(--color-border);
+    white-space: nowrap;
+}
+
+.schedule-table td {
+    padding: .35rem .6rem;
+    border-bottom: 1px solid #f1f5f9;
+    vertical-align: middle;
+}
+
+.schedule-table tr:last-child td { border-bottom: none; }
+.schedule-table tr:hover td { background: #f8fafc; }
+
+.schedule-time {
+    font-family: ui-monospace, monospace;
+    color: var(--color-muted);
+    white-space: nowrap;
+}
+
+.schedule-entity {
+    font-family: ui-monospace, monospace;
+    word-break: break-all;
+}
+
+.schedule-state {
+    font-size: .8rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.state-on  { color: var(--color-active); }
+.state-off { color: var(--color-muted); }
