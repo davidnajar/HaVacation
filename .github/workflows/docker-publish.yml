@@ -46,7 +46,7 @@ jobs:
       # Tags produced:
       #   • latest            (on every push to main)
       #   • main              (branch name)
-      #   • 1.2.3 / 1.2       (from git tag v1.2.3)
+      #   • 26.04.1           (from git tag v26.04.1, stripping the "v" prefix)
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -55,8 +55,7 @@ jobs:
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=branch
-            type=semver,pattern={{version}},prefix=
-            type=semver,pattern={{major}}.{{minor}},prefix=
+            type=match,pattern=v(.*),group=1
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
