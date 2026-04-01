@@ -200,20 +200,22 @@ public sealed class VacationWorker : BackgroundService
     /// <summary>
     /// Drains all events from the queue whose <see cref="ScheduledReplay.FireAt"/>
     /// is at or before <paramref name="now"/> and calls the HA service for each.
-    /// Events are dequeued immediately; any event that is not yet due is re-enqueued
-    /// and the loop stops.
+    /// Uses TryPeek before TryDequeue so that not-yet-due events are never removed
+    /// from the queue, preserving the FireAt-sorted order at all times.
     /// </summary>
     private async Task FireDueEventsAsync(DateTimeOffset now, CancellationToken ct)
     {
-        // Dequeue directly and check the timestamp afterward to avoid a TryPeek/TryDequeue race.
-        while (_queue.TryDequeue(out var replay))
+        // Single-consumer invariant: only the ExecuteAsync loop calls this method,
+        // so TryPeek followed by TryDequeue is race-free here.
+        // Peek first — if the front event is not yet due we stop without touching the queue.
+        while (_queue.TryPeek(out var replay))
         {
             if (replay.FireAt > now)
-            {
-                // Not due yet — put it back and stop.
-                _queue.Enqueue(replay);
+                break; // Next event is not yet due; queue order is preserved.
+
+            // The event is due — remove it definitively.
+            if (!_queue.TryDequeue(out replay))
                 break;
-            }
 
             try
             {
