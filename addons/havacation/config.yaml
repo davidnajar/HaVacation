@@ -3,7 +3,7 @@ name: "HaVacation"
 description: >-
   Makes your home look occupied while you're away by replaying historical
   Home Assistant entity activity with configurable random jitter.
-version: "26.08.1"
+version: "26.08.2"
 slug: "havacation"
 url: "https://github.com/davidnajar/HaVacation"
 image: "ghcr.io/davidnajar/havacation"
