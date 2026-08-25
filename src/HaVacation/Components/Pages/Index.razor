@@ -147,7 +147,7 @@
     @for (var i = 0; i < _vacation.ExcludedEntities.Count; i++)
     {
         var index = i;
-        <div class="entity-row" @key="($"excluded-{index}")">
+        <div class="entity-row" @key="index">
             <input type="text" class="form-control" value="@_vacation.ExcludedEntities[index]"
                    @onchange="e => _vacation.ExcludedEntities[index] = e.Value?.ToString() ?? string.Empty" />
             <button class="btn btn-remove" type="button" @onclick="() => _vacation.ExcludedEntities.RemoveAt(index)">✕</button>
@@ -163,7 +163,7 @@
     @for (var i = 0; i < _vacation.ExcludedPatterns.Count; i++)
     {
         var index = i;
-        <div class="entity-row" @key="($"pattern-{index}")">
+        <div class="entity-row" @key="index">
             <input type="text" class="form-control" value="@_vacation.ExcludedPatterns[index]"
                    @onchange="e => _vacation.ExcludedPatterns[index] = e.Value?.ToString() ?? string.Empty" />
             <button class="btn btn-remove" type="button" @onclick="() => _vacation.ExcludedPatterns.RemoveAt(index)">✕</button>
@@ -199,7 +199,7 @@
                     <tbody>
                     @foreach (var ev in _preview)
                     {
-                        <tr @key="($"preview-{ev.EntityId}-{ev.FireAt.Ticks}")">
+                        <tr @key="ev">
                             <td class="schedule-time">@ev.FireAt.ToString("HH:mm:ss")</td>
                             <td class="schedule-entity">@ev.EntityId</td>
                             <td class="schedule-state @(ev.State is "on" or "open" ? "state-on" : "state-off")">@ev.State</td>
@@ -235,7 +235,7 @@
                 <tbody>
                 @foreach (var ev in _schedule)
                 {
-                    <tr @key="@(ev.EntityId + ev.FireAt.Ticks)">
+                    <tr @key="ev">
                         <td class="schedule-time">@ev.FireAt.ToString("HH:mm:ss")</td>
                         <td class="schedule-entity">@ev.EntityId</td>
                         <td class="schedule-state @(ev.State is "on" or "open" ? "state-on" : "state-off")">@ev.State</td>
