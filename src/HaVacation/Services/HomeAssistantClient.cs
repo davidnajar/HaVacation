@@ -16,6 +16,36 @@ public sealed class HomeAssistantClient
     public HomeAssistantClient(HttpClient http, ConfigurationService config, ILogger<HomeAssistantClient> log)
         => (_http, _config, _log) = (http, config, log);
 
+    public async Task<string> GetTimeZoneAsync(CancellationToken ct = default)
+    {
+        Configure();
+        using var response = await _http.GetAsync("config", ct);
+        response.EnsureSuccessStatusCode();
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+        return doc.RootElement.TryGetProperty("time_zone", out var tz) && !string.IsNullOrWhiteSpace(tz.GetString())
+            ? tz.GetString()!
+            : "UTC";
+    }
+
+    public async Task PublishNextEventSensorAsync(ScheduledReplay? next, bool enabled, CancellationToken ct = default)
+    {
+        Configure();
+        var state = next is null ? (enabled ? "none" : "disabled") : $"{next.EntityId} → {next.State}";
+        var attrs = new Dictionary<string, object?>
+        {
+            ["friendly_name"] = "HaVacation Next Event",
+            ["icon"] = "mdi:calendar-clock",
+            ["vacation_mode"] = enabled,
+            ["entity_id"] = next?.EntityId,
+            ["action"] = next?.State,
+            ["scheduled_at"] = next?.FireAt.ToString("o")
+        };
+        using var body = new StringContent(JsonSerializer.Serialize(new { state, attributes = attrs }), Encoding.UTF8, "application/json");
+        using var response = await _http.PostAsync("states/sensor.havacation_next_event", body, ct);
+        if (!response.IsSuccessStatusCode)
+            _log.LogDebug("Could not publish HaVacation next-event sensor: {Status}", response.StatusCode);
+    }
+
     public async Task<List<HaEntityInfo>> GetEntitiesAsync(CancellationToken ct = default)
     {
         Configure();
@@ -85,7 +115,6 @@ public sealed class HomeAssistantClient
     {
         var payload = new Dictionary<string, object> { ["entity_id"] = entityId };
         if (attrs.TryGetProperty("brightness", out var b) && b.ValueKind == JsonValueKind.Number) payload["brightness"] = b.GetInt32();
-        // color_temp_kelvin is the current HA attribute; retain mired color_temp as a fallback for older histories.
         if (attrs.TryGetProperty("color_temp_kelvin", out var k) && k.ValueKind == JsonValueKind.Number) payload["color_temp_kelvin"] = k.GetInt32();
         else if (attrs.TryGetProperty("color_temp", out var t) && t.ValueKind == JsonValueKind.Number) payload["color_temp"] = t.GetInt32();
         if (attrs.TryGetProperty("rgb_color", out var rgb) && rgb.ValueKind == JsonValueKind.Array) payload["rgb_color"] = rgb.EnumerateArray().Select(v => v.GetInt32()).ToArray();
