@@ -11,6 +11,7 @@ public sealed class VacationWorker : BackgroundService
     private readonly HomeAssistantClient _ha;
     private readonly ConfigurationService _config;
     private readonly ILogger<VacationWorker> _log;
+    private string? _detectedTimeZone;
 
     public VacationWorker(HomeAssistantClient ha, ConfigurationService config, ILogger<VacationWorker> log)
         => (_ha, _config, _log) = (ha, config, log);
@@ -26,17 +27,18 @@ public sealed class VacationWorker : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
         await LoadScheduleForTodayAsync(ct);
-        var lastLocalDate = GetLocalNow(_config.GetVacationConfig()).Date;
+        var lastLocalDate = (await GetLocalNowAsync(_config.GetVacationConfig(), ct)).Date;
         while (!ct.IsCancellationRequested)
         {
             var cfg = _config.GetVacationConfig();
-            var now = GetLocalNow(cfg);
+            var now = await GetLocalNowAsync(cfg, ct);
             if (Interlocked.Exchange(ref _rescheduleRequested, 0) == 1 || now.Date != lastLocalDate)
             {
                 lastLocalDate = now.Date;
                 await LoadScheduleForTodayAsync(ct);
             }
             await FireDueEventsAsync(now, ct);
+            await PublishStatusAsync(ct);
             await Task.Delay(TimeSpan.FromSeconds(1), ct);
         }
     }
@@ -45,11 +47,16 @@ public sealed class VacationWorker : BackgroundService
     {
         var cfg = _config.GetVacationConfig();
         ClearQueue();
-        if (!cfg.Enabled || cfg.Entities.Count == 0) { Interlocked.Increment(ref _scheduleVersion); return; }
+        if (!cfg.Enabled || cfg.Entities.Count == 0)
+        {
+            Interlocked.Increment(ref _scheduleVersion);
+            await PublishStatusAsync(ct);
+            return;
+        }
 
         try
         {
-            var tz = ResolveTimeZone(cfg.TimeZone);
+            var tz = await ResolveTimeZoneAsync(cfg, ct);
             var localNow = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, tz);
             var referenceDate = localNow.Date.AddDays(-cfg.LookbackDays);
             var from = LocalBoundary(referenceDate, tz);
@@ -71,7 +78,11 @@ public sealed class VacationWorker : BackgroundService
         {
             _log.LogError(ex, "Failed to build vacation schedule");
         }
-        finally { Interlocked.Increment(ref _scheduleVersion); }
+        finally
+        {
+            Interlocked.Increment(ref _scheduleVersion);
+            await PublishStatusAsync(ct);
+        }
     }
 
     private async Task FireDueEventsAsync(DateTimeOffset now, CancellationToken ct)
@@ -95,9 +106,36 @@ public sealed class VacationWorker : BackgroundService
         }
     }
 
+    private async Task PublishStatusAsync(CancellationToken ct)
+    {
+        try
+        {
+            ScheduledReplay? next;
+            lock (_queueLock) next = _queue.TryPeek(out var item, out _) ? item : null;
+            await _ha.PublishNextEventSensorAsync(next, _config.GetVacationConfig().Enabled, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _log.LogDebug(ex, "Could not publish Home Assistant status sensor");
+        }
+    }
+
+    private async Task<TimeZoneInfo> ResolveTimeZoneAsync(VacationConfig cfg, CancellationToken ct)
+    {
+        var id = cfg.TimeZone;
+        if (string.IsNullOrWhiteSpace(id) || id.Equals("auto", StringComparison.OrdinalIgnoreCase))
+        {
+            _detectedTimeZone ??= await _ha.GetTimeZoneAsync(ct);
+            id = _detectedTimeZone;
+        }
+        return TimeZoneInfo.FindSystemTimeZoneById(id);
+    }
+
+    private async Task<DateTimeOffset> GetLocalNowAsync(VacationConfig cfg, CancellationToken ct)
+        => TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, await ResolveTimeZoneAsync(cfg, ct));
+
     private void ClearQueue() { lock (_queueLock) _queue.Clear(); }
-    private static TimeZoneInfo ResolveTimeZone(string id) => TimeZoneInfo.FindSystemTimeZoneById(string.IsNullOrWhiteSpace(id) ? "UTC" : id);
-    private static DateTimeOffset GetLocalNow(VacationConfig cfg) => TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, ResolveTimeZone(cfg.TimeZone));
+
     private static DateTimeOffset LocalBoundary(DateTime local, TimeZoneInfo tz)
     {
         var unspecified = DateTime.SpecifyKind(local, DateTimeKind.Unspecified);
