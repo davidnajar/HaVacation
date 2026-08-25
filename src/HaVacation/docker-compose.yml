@@ -6,13 +6,13 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
-    # Mount your local appsettings.json so changes made via the UI persist on the host.
     volumes:
-      - ./appsettings.json:/app/appsettings.json
-    # Alternatively, override individual settings with environment variables:
-    # environment:
-    #   - HomeAssistant__Url=http://homeassistant.local:8123
-    #   - HomeAssistant__Token=your_token_here
-    #   - Vacation__Enabled=true
-    #   - Vacation__Entities__0=light.living_room
-    #   - Vacation__Entities__1=cover.living_room_blind
+      - ./data:/data
+    environment:
+      HAVACATION_DATA_DIR: /data
+      # Standalone Docker only. Home Assistant add-ons use Supervisor automatically.
+      # HomeAssistant__Url: http://homeassistant.local:8123
+      # HomeAssistant__Token: your_token_here
+      # Vacation__Enabled: "true"
+      # Vacation__TimeZone: Europe/Madrid
+      # Vacation__Entities: light.living_room,cover.living_room_blind

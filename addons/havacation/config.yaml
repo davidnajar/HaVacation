@@ -1,56 +1,39 @@
 ---
 name: "HaVacation"
 description: >-
-  Makes your home look occupied while you're away by replaying the previous
-  week's entity history through Home Assistant, with a random jitter so the
-  pattern is never perfectly identical.
-version: "26.04.4"
+  Makes your home look occupied while you're away by replaying historical
+  Home Assistant entity activity with configurable random jitter.
+version: "26.08.2"
 slug: "havacation"
 url: "https://github.com/davidnajar/HaVacation"
-
-# Pre-built multi-arch image published to GHCR.
-# The Supervisor appends :{version} when pulling, so the tag "1.0.0" must
-# exist in the registry (created by the docker-publish GitHub Actions workflow
-# when a git tag v1.0.0 is pushed).
 image: "ghcr.io/davidnajar/havacation"
 
 arch:
   - amd64
   - aarch64
 
-# Supervisor should NOT run the S6-overlay init system; the image has its own
-# entrypoint (docker-entrypoint.sh).
 init: false
+startup: application
+boot: auto
 
-# Ingress – enables the "Open Web UI" button in Home Assistant and proxies
-# traffic through the Supervisor without exposing an extra host port.
+homeassistant_api: true
+
+# MQTT is optional. If a broker service exists, MQTT Discovery adds a
+# controllable Vacation Mode switch. Core replay works without MQTT.
+services:
+  - mqtt:want
+
 ingress: true
 ingress_port: 8080
+ingress_stream: true
+panel_icon: "mdi:beach"
 
-# Ports exposed to the host (optional – only needed if you want to reach the
-# Blazor UI directly, outside of the HA ingress proxy).
 ports:
   8080/tcp: null
 ports_description:
-  8080/tcp: "HaVacation Blazor web UI (direct access, optional)"
+  8080/tcp: "HaVacation web UI (direct access, optional)"
 
-# ── Add-on options ─────────────────────────────────────────────────────────────
-options:
-  homeassistant_url: "http://homeassistant.local:8123"
-  homeassistant_token: ""
-  vacation_enabled: false
-  lookback_days: 7
-  random_jitter_seconds: 120
-  entities: []
+options: {}
+schema: {}
 
-schema:
-  homeassistant_url: str
-  homeassistant_token: str
-  vacation_enabled: bool
-  lookback_days: int
-  random_jitter_seconds: int
-  entities:
-    - str
-
-# Minimum required HA version.
-homeassistant: "2023.1"
+homeassistant: "2025.1.0"

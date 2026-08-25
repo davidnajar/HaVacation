@@ -1,95 +1,113 @@
-using HaVacation.Models;
-using Microsoft.Extensions.Options;
 using System.Text.Json;
-using System.Text.Json.Nodes;
+using HaVacation.Models;
 
 namespace HaVacation.Services;
 
-/// <summary>
-/// Reads current vacation/HA settings and persists changes back to appsettings.json.
-/// Because IOptionsMonitor watches the file, the worker picks up changes automatically.
-/// </summary>
 public sealed class ConfigurationService
 {
-    private readonly IOptionsMonitor<HomeAssistantConfig> _haCfg;
-    private readonly IOptionsMonitor<VacationConfig> _vacationCfg;
-    private readonly string _settingsPath;
-    private readonly SemaphoreSlim _writeLock = new(1, 1);
+    private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly string _path;
+    private PersistedConfig _config;
+    private long _revision;
+    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+    public long Revision => Interlocked.Read(ref _revision);
 
-    public ConfigurationService(
-        IOptionsMonitor<HomeAssistantConfig> haCfg,
-        IOptionsMonitor<VacationConfig> vacationCfg,
-        IHostEnvironment env)
+    public ConfigurationService(IHostEnvironment env, ILogger<ConfigurationService> log)
     {
-        _haCfg       = haCfg;
-        _vacationCfg = vacationCfg;
-        _settingsPath = Path.Combine(env.ContentRootPath, "appsettings.json");
+        var configuredDir = Environment.GetEnvironmentVariable("HAVACATION_DATA_DIR");
+        var dataDir = !string.IsNullOrWhiteSpace(configuredDir) ? configuredDir : Path.Combine(env.ContentRootPath, "data");
+        Directory.CreateDirectory(dataDir);
+        _path = Path.Combine(dataDir, "havacation.json");
+        _config = Load(log);
     }
 
-    /// <summary>Returns a detached copy of the current Home Assistant config.</summary>
-    public HomeAssistantConfig GetHomeAssistantConfig() => new()
+    private PersistedConfig Load(ILogger log)
     {
-        Url   = _haCfg.CurrentValue.Url,
-        Token = _haCfg.CurrentValue.Token
-    };
-
-    /// <summary>Returns a detached copy of the current vacation config.</summary>
-    public VacationConfig GetVacationConfig() => new()
-    {
-        Enabled             = _vacationCfg.CurrentValue.Enabled,
-        LookbackDays        = _vacationCfg.CurrentValue.LookbackDays,
-        RandomJitterSeconds = _vacationCfg.CurrentValue.RandomJitterSeconds,
-        Entities            = [.. _vacationCfg.CurrentValue.Entities]
-    };
-
-    /// <summary>
-    /// Persists <paramref name="haConfig"/> and <paramref name="vacationConfig"/> to
-    /// appsettings.json, preserving any other sections already in the file.
-    /// A semaphore ensures only one write occurs at a time.
-    /// </summary>
-    public async Task SaveAsync(HomeAssistantConfig haConfig, VacationConfig vacationConfig)
-    {
-        await _writeLock.WaitAsync();
         try
         {
-            string raw = File.Exists(_settingsPath)
-                ? await File.ReadAllTextAsync(_settingsPath)
-                : "{}";
-
-            // Parse allowing the JSON comments that may exist in the default file.
-            var documentOptions = new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip };
-            var root            = JsonNode.Parse(raw, documentOptions: documentOptions) as JsonObject ?? new JsonObject();
-
-            // Build and replace the HomeAssistant section.
-            root["HomeAssistant"] = new JsonObject
-            {
-                ["Url"]   = haConfig.Url,
-                ["Token"] = haConfig.Token
-            };
-
-            // Build and replace the Vacation section.
-            var entitiesArray = new JsonArray();
-            foreach (var entity in vacationConfig.Entities.Where(e => !string.IsNullOrWhiteSpace(e)))
-                entitiesArray.Add(JsonValue.Create(entity.Trim()));
-
-            root["Vacation"] = new JsonObject
-            {
-                ["Enabled"]             = vacationConfig.Enabled,
-                ["LookbackDays"]        = vacationConfig.LookbackDays,
-                ["RandomJitterSeconds"] = vacationConfig.RandomJitterSeconds,
-                ["Entities"]            = entitiesArray
-            };
-
-            // Write to a temp file first, then atomically replace the target to avoid
-            // partial writes corrupting the config if the process is interrupted.
-            var tempPath     = _settingsPath + ".tmp";
-            var writeOptions = new JsonSerializerOptions { WriteIndented = true };
-            await File.WriteAllTextAsync(tempPath, root.ToJsonString(writeOptions));
-            File.Move(tempPath, _settingsPath, overwrite: true);
+            if (File.Exists(_path))
+                return JsonSerializer.Deserialize<PersistedConfig>(File.ReadAllText(_path), JsonOptions) ?? new();
         }
-        finally
+        catch (Exception ex) { log.LogError(ex, "Could not load {Path}; defaults will be used", _path); }
+
+        return new PersistedConfig
         {
-            _writeLock.Release();
-        }
+            HomeAssistant = new()
+            {
+                Url = Environment.GetEnvironmentVariable("HomeAssistant__Url") ?? "",
+                Token = Environment.GetEnvironmentVariable("HomeAssistant__Token") ?? ""
+            },
+            Vacation = new()
+            {
+                Enabled = bool.TryParse(Environment.GetEnvironmentVariable("Vacation__Enabled"), out var enabled) && enabled,
+                LookbackDays = int.TryParse(Environment.GetEnvironmentVariable("Vacation__LookbackDays"), out var days) ? days : 7,
+                RandomJitterSeconds = int.TryParse(Environment.GetEnvironmentVariable("Vacation__RandomJitterSeconds"), out var jitter) ? jitter : 120,
+                TimeZone = Environment.GetEnvironmentVariable("Vacation__TimeZone") ?? "auto",
+                Entities = SplitCsv("Vacation__Entities"),
+                ExcludedEntities = SplitCsv("Vacation__ExcludedEntities"),
+                ExcludedPatterns = SplitCsv("Vacation__ExcludedPatterns")
+            }
+        };
     }
+
+    private static List<string> SplitCsv(string name) =>
+        (Environment.GetEnvironmentVariable(name) ?? "")
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
+
+    public HomeAssistantConfig GetHomeAssistantConfig() => new() { Url = _config.HomeAssistant.Url, Token = _config.HomeAssistant.Token };
+
+    public VacationConfig GetVacationConfig() => new()
+    {
+        Enabled = _config.Vacation.Enabled,
+        LookbackDays = _config.Vacation.LookbackDays,
+        RandomJitterSeconds = _config.Vacation.RandomJitterSeconds,
+        TimeZone = string.IsNullOrWhiteSpace(_config.Vacation.TimeZone) ? "auto" : _config.Vacation.TimeZone,
+        Entities = [.. _config.Vacation.Entities],
+        ExcludedEntities = [.. _config.Vacation.ExcludedEntities],
+        ExcludedPatterns = [.. _config.Vacation.ExcludedPatterns]
+    };
+
+    public async Task SaveAsync(HomeAssistantConfig ha, VacationConfig vacation)
+    {
+        await _gate.WaitAsync();
+        try
+        {
+            vacation.LookbackDays = Math.Clamp(vacation.LookbackDays, 1, 365);
+            vacation.RandomJitterSeconds = Math.Clamp(vacation.RandomJitterSeconds, 0, 3600);
+            vacation.Entities = Normalize(vacation.Entities);
+            vacation.ExcludedEntities = Normalize(vacation.ExcludedEntities);
+            vacation.ExcludedPatterns = Normalize(vacation.ExcludedPatterns);
+            vacation.TimeZone = string.IsNullOrWhiteSpace(vacation.TimeZone) ? "auto" : vacation.TimeZone.Trim();
+            if (!vacation.TimeZone.Equals("auto", StringComparison.OrdinalIgnoreCase))
+                _ = TimeZoneInfo.FindSystemTimeZoneById(vacation.TimeZone);
+
+            _config = new PersistedConfig
+            {
+                HomeAssistant = new() { Url = ha.Url.Trim(), Token = ha.Token.Trim() },
+                Vacation = new()
+                {
+                    Enabled = vacation.Enabled,
+                    LookbackDays = vacation.LookbackDays,
+                    RandomJitterSeconds = vacation.RandomJitterSeconds,
+                    TimeZone = vacation.TimeZone,
+                    Entities = [.. vacation.Entities],
+                    ExcludedEntities = [.. vacation.ExcludedEntities],
+                    ExcludedPatterns = [.. vacation.ExcludedPatterns]
+                }
+            };
+
+            var tmp = _path + ".tmp";
+            await File.WriteAllTextAsync(tmp, JsonSerializer.Serialize(_config, JsonOptions));
+            File.Move(tmp, _path, true);
+            Interlocked.Increment(ref _revision);
+        }
+        finally { _gate.Release(); }
+    }
+
+    private static List<string> Normalize(IEnumerable<string> values) => values
+        .Select(e => e.Trim())
+        .Where(e => !string.IsNullOrWhiteSpace(e))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToList();
 }
