@@ -15,6 +15,9 @@ public sealed class VacationConfig
     // "auto" asks Home Assistant for its configured time_zone.
     public string TimeZone { get; set; } = "auto";
     public List<string> Entities { get; set; } = [];
+    public List<string> ExcludedEntities { get; set; } = [];
+    // Shell-like wildcards: * matches any sequence, ? matches one character.
+    public List<string> ExcludedPatterns { get; set; } = [];
 }
 
 public sealed class PersistedConfig
