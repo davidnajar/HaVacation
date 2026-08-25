@@ -3,7 +3,7 @@ name: "HaVacation"
 description: >-
   Makes your home look occupied while you're away by replaying historical
   Home Assistant entity activity with configurable random jitter.
-version: "26.08.0"
+version: "26.08.1"
 slug: "havacation"
 url: "https://github.com/davidnajar/HaVacation"
 image: "ghcr.io/davidnajar/havacation"
@@ -16,12 +16,15 @@ init: false
 startup: application
 boot: auto
 
-# Gives the add-on a scoped Supervisor token and access to the HA Core API.
 homeassistant_api: true
+
+# MQTT is optional. When a broker service exists, HaVacation publishes a
+# controllable Vacation Mode switch and a Next Event sensor via MQTT Discovery.
+services:
+  - mqtt:want
 
 ingress: true
 ingress_port: 8080
-# Blazor Server uses a long-lived SignalR connection through ingress.
 ingress_stream: true
 panel_icon: "mdi:beach"
 
