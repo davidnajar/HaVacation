@@ -8,6 +8,29 @@ When installed as a Home Assistant add-on, HaVacation uses the Supervisor API au
 
 The timezone defaults to `auto`: HaVacation reads Home Assistant's configured `time_zone` from Core, so replay times follow the same local timezone and DST rules as Home Assistant.
 
+## Preview / Dry Run
+
+Before enabling Vacation Mode, use **Preview today** in the HaVacation UI. The preview uses the same planning engine as the live scheduler, including lookback day, exclusions, timezone handling and random jitter, but it never calls a Home Assistant service.
+
+Only events that would still happen later today are shown. This makes it possible to inspect the exact entities, times and target states before activating Vacation Mode.
+
+## Included entities and exclusions
+
+The included list defines which entities HaVacation may replay. Exclusions always win over the included list.
+
+You can exclude exact entity IDs, for example:
+
+- `switch.fridge`
+- `media_player.living_room_tv`
+
+You can also exclude groups using shell-like patterns:
+
+- `media_player.*`
+- `switch.fridge_*`
+- `light.guest_?`
+
+`*` matches any sequence of characters and `?` matches a single character. Excluded entities are filtered before history is requested and are also checked again before events are planned.
+
 ### Home Assistant entities
 
 HaVacation publishes `sensor.havacation_next_event` directly through the Home Assistant Core API. Its state describes the next replay, with `entity_id`, `action`, `scheduled_at`, and `vacation_mode` attributes.
@@ -37,7 +60,7 @@ actions:
 
 ## Standalone Docker
 
-Standalone Docker remains supported. Persist `/app/data`, and configure Home Assistant using the web UI or bootstrap environment variables (`HomeAssistant__Url`, `HomeAssistant__Token`, `Vacation__TimeZone`, etc.).
+Standalone Docker remains supported. Persist `/app/data`, and configure Home Assistant using the web UI or bootstrap environment variables (`HomeAssistant__Url`, `HomeAssistant__Token`, `Vacation__TimeZone`, `Vacation__ExcludedEntities`, `Vacation__ExcludedPatterns`, etc.). Comma-separated values are supported for the entity lists when bootstrapping from environment variables.
 
 ## Replay support
 
