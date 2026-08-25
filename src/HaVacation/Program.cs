@@ -7,6 +7,8 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton<ConfigurationService>();
 builder.Services.AddSingleton<VacationWorker>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<VacationWorker>());
+builder.Services.AddSingleton<MqttDiscoveryBridge>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<MqttDiscoveryBridge>());
 builder.Services.AddRazorComponents().AddInteractiveServerComponents();
 
 var app = builder.Build();
