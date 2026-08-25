@@ -1,247 +1,107 @@
 using HaVacation.Models;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
-using System.Collections.Concurrent;
 
 namespace HaVacation.Services;
 
-/// <summary>
-/// The heart of HaVacation.
-///
-/// How it works
-/// ─────────────
-/// 1. On startup (and every night at midnight) the worker looks up the history
-///    of all configured entities for the same calendar day N days ago.
-/// 2. Each recorded state-change is re-scheduled for today at the same time-of-day,
-///    offset by a small random jitter so the pattern is never identical.
-/// 3. Every second the worker checks the queue and fires any events whose
-///    scheduled time has arrived.
-///
-/// Enable / disable via the "Vacation:Enabled" config flag without restarting:
-///   • appsettings.json
-///   • environment variable VACATION__ENABLED=true
-///   • docker-compose environment section
-/// </summary>
 public sealed class VacationWorker : BackgroundService
 {
-    // The pending replay queue is sorted by FireAt; a ConcurrentQueue gives us
-    // lock-free access from the single worker loop.
-    private readonly ConcurrentQueue<ScheduledReplay> _queue = new();
-
-    // Set to 1 via Interlocked when the UI requests an immediate reschedule.
-    private int  _rescheduleRequested;
+    private readonly PriorityQueue<ScheduledReplay, DateTimeOffset> _queue = new();
+    private readonly object _queueLock = new();
+    private int _rescheduleRequested;
     private long _scheduleVersion;
-
     private readonly HomeAssistantClient _ha;
-    private readonly IOptionsMonitor<VacationConfig> _vacationCfg;
+    private readonly ConfigurationService _config;
     private readonly ILogger<VacationWorker> _log;
-    private readonly Random _rng = Random.Shared;
 
-    public VacationWorker(
-        HomeAssistantClient ha,
-        IOptionsMonitor<VacationConfig> vacationCfg,
-        ILogger<VacationWorker> log)
+    public VacationWorker(HomeAssistantClient ha, ConfigurationService config, ILogger<VacationWorker> log)
+        => (_ha, _config, _log) = (ha, config, log);
+
+    public long ScheduleVersion => Interlocked.Read(ref _scheduleVersion);
+    public void RequestReschedule() => Interlocked.Exchange(ref _rescheduleRequested, 1);
+
+    public IReadOnlyList<ScheduledReplay> PeekSchedule()
     {
-        _ha          = ha;
-        _vacationCfg = vacationCfg;
-        _log         = log;
+        lock (_queueLock) return [.. _queue.UnorderedItems.Select(x => x.Element).OrderBy(x => x.FireAt)];
     }
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
-        _log.LogInformation("HaVacation worker started.");
-
-        // Build today's schedule immediately on startup.
         await LoadScheduleForTodayAsync(ct);
-
-        var lastScheduleDate = DateTimeOffset.Now.Date;
-
+        var lastLocalDate = GetLocalNow(_config.GetVacationConfig()).Date;
         while (!ct.IsCancellationRequested)
         {
-            var now = DateTimeOffset.Now;
-
-            // Honour a manual reschedule request from the UI.
-            if (Interlocked.CompareExchange(ref _rescheduleRequested, 0, 1) == 1)
+            var cfg = _config.GetVacationConfig();
+            var now = GetLocalNow(cfg);
+            if (Interlocked.Exchange(ref _rescheduleRequested, 0) == 1 || now.Date != lastLocalDate)
             {
-                lastScheduleDate = now.Date;
+                lastLocalDate = now.Date;
                 await LoadScheduleForTodayAsync(ct);
             }
-            // Refresh the schedule at midnight for the new day.
-            else if (now.Date != lastScheduleDate)
-            {
-                lastScheduleDate = now.Date;
-                await LoadScheduleForTodayAsync(ct);
-            }
-
             await FireDueEventsAsync(now, ct);
-
-            // Tick every second – fine-grained enough to respect jitter precision.
             await Task.Delay(TimeSpan.FromSeconds(1), ct);
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Public API (used by the Blazor UI)
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// Signals the worker to rebuild today's schedule on the next tick.
-    /// Safe to call from any thread.
-    /// </summary>
-    public void RequestReschedule() =>
-        Interlocked.Exchange(ref _rescheduleRequested, 1);
-
-    /// <summary>
-    /// A monotonically increasing counter that the worker increments every time
-    /// <see cref="LoadScheduleForTodayAsync"/> completes. The UI can poll this
-    /// value to detect when a force-reschedule has been processed.
-    /// </summary>
-    public long ScheduleVersion => Interlocked.Read(ref _scheduleVersion);
-
-    /// <summary>
-    /// Returns a snapshot of the currently queued replay events, sorted by
-    /// <see cref="ScheduledReplay.FireAt"/>. Safe to call from any thread.
-    /// </summary>
-    public IReadOnlyList<ScheduledReplay> PeekSchedule() =>
-        [.. _queue.OrderBy(r => r.FireAt)];
-
-    // -------------------------------------------------------------------------
-    // Schedule loading
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// Fetches history for the reference day (today − LookbackDays) and
-    /// populates the queue with today's replay times.
-    /// </summary>
     private async Task LoadScheduleForTodayAsync(CancellationToken ct)
     {
-        var cfg = _vacationCfg.CurrentValue;
+        var cfg = _config.GetVacationConfig();
+        ClearQueue();
+        if (!cfg.Enabled || cfg.Entities.Count == 0) { Interlocked.Increment(ref _scheduleVersion); return; }
 
-        if (!cfg.Enabled)
-        {
-            _log.LogInformation("Vacation mode is disabled – no schedule loaded.");
-            ClearQueue();
-            Interlocked.Increment(ref _scheduleVersion);
-            return;
-        }
-
-        if (cfg.Entities.Count == 0)
-        {
-            _log.LogWarning("Vacation mode is enabled but no entities are configured.");
-            Interlocked.Increment(ref _scheduleVersion);
-            return;
-        }
-
-        // Reference window: the full calendar day N days ago.
-        var referenceDate = DateTimeOffset.Now.Date.AddDays(-cfg.LookbackDays);
-        var from = new DateTimeOffset(referenceDate, TimeSpan.Zero);
-        var to   = from.AddDays(1);
-
-        _log.LogInformation(
-            "Loading vacation schedule – reference day: {Date}, entities: {Count}",
-            referenceDate.ToShortDateString(),
-            cfg.Entities.Count);
-
-        List<EntityStateEntry> history;
         try
         {
-            history = await _ha.GetHistoryAsync(cfg.Entities, from, to, ct);
-        }
-        catch (Exception ex)
-        {
-            _log.LogError(ex, "Failed to fetch history from Home Assistant.");
-            Interlocked.Increment(ref _scheduleVersion);
-            return;
-        }
+            var tz = ResolveTimeZone(cfg.TimeZone);
+            var localNow = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, tz);
+            var referenceDate = localNow.Date.AddDays(-cfg.LookbackDays);
+            var from = LocalBoundary(referenceDate, tz);
+            var to = LocalBoundary(referenceDate.AddDays(1), tz);
+            var history = await _ha.GetHistoryAsync(cfg.Entities, from, to, ct);
 
-        ClearQueue();
-
-        var today     = DateTimeOffset.Now.Date;
-        var jitterMax = cfg.RandomJitterSeconds;
-        var count     = 0;
-
-        foreach (var entry in history)
-        {
-            // Translate reference-day time → today's equivalent time.
-            var timeOfDay = entry.LastChanged - entry.LastChanged.Date;
-            var fireAt    = new DateTimeOffset(today, entry.LastChanged.Offset) + timeOfDay;
-
-            // Apply random jitter (±jitterMax seconds).
-            var jitterSec = _rng.Next(-jitterMax, jitterMax + 1);
-            fireAt = fireAt.AddSeconds(jitterSec);
-
-            // Skip events that are already in the past (e.g. service restarted mid-day).
-            if (fireAt < DateTimeOffset.Now)
-                continue;
-
-            _queue.Enqueue(new ScheduledReplay
+            foreach (var entry in history)
             {
-                EntityId   = entry.EntityId,
-                State      = entry.State,
-                Attributes = entry.Attributes,
-                FireAt     = fireAt
-            });
-            count++;
+                var historicalLocal = TimeZoneInfo.ConvertTime(entry.LastChanged, tz);
+                var targetLocal = localNow.Date + historicalLocal.TimeOfDay;
+                var fireAt = LocalBoundary(targetLocal, tz).AddSeconds(Random.Shared.Next(-cfg.RandomJitterSeconds, cfg.RandomJitterSeconds + 1));
+                var fireAtLocal = TimeZoneInfo.ConvertTime(fireAt, tz);
+                if (fireAtLocal <= localNow) continue;
+                var replay = new ScheduledReplay { EntityId = entry.EntityId, State = entry.State, Attributes = entry.Attributes, FireAt = fireAtLocal };
+                lock (_queueLock) _queue.Enqueue(replay, fireAtLocal);
+            }
         }
-
-        _log.LogInformation(
-            "Schedule loaded: {Scheduled} events queued ({Skipped} past events skipped).",
-            count,
-            history.Count - count);
-
-        Interlocked.Increment(ref _scheduleVersion);
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _log.LogError(ex, "Failed to build vacation schedule");
+        }
+        finally { Interlocked.Increment(ref _scheduleVersion); }
     }
 
-    // -------------------------------------------------------------------------
-    // Event execution
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// Drains all events from the queue whose <see cref="ScheduledReplay.FireAt"/>
-    /// is at or before <paramref name="now"/> and calls the HA service for each.
-    /// Uses TryPeek before TryDequeue so that not-yet-due events are never removed
-    /// from the queue, preserving the FireAt-sorted order at all times.
-    /// </summary>
     private async Task FireDueEventsAsync(DateTimeOffset now, CancellationToken ct)
     {
-        // Single-consumer invariant: only the ExecuteAsync loop calls this method,
-        // so TryPeek followed by TryDequeue is race-free here.
-        // Peek first — if the front event is not yet due we stop without touching the queue.
-        while (_queue.TryPeek(out var replay))
+        while (true)
         {
-            if (replay.FireAt > now)
-                break; // Next event is not yet due; queue order is preserved.
-
-            // The event is due — remove it definitively.
-            if (!_queue.TryDequeue(out replay))
-                break;
-
+            ScheduledReplay? replay;
+            lock (_queueLock)
+            {
+                if (!_queue.TryPeek(out replay, out var due) || due > now) return;
+                _queue.Dequeue();
+            }
             try
             {
-                await _ha.ReplayStateAsync(
-                    new EntityStateEntry
-                    {
-                        EntityId    = replay.EntityId,
-                        State       = replay.State,
-                        Attributes  = replay.Attributes,
-                        LastChanged = replay.FireAt
-                    },
-                    ct);
+                await _ha.ReplayStateAsync(new EntityStateEntry { EntityId = replay!.EntityId, State = replay.State, Attributes = replay.Attributes, LastChanged = replay.FireAt }, ct);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _log.LogError(ex, "Failed to replay {EntityId} → {State}.", replay.EntityId, replay.State);
+                _log.LogError(ex, "Failed to replay {Entity} -> {State}", replay!.EntityId, replay.State);
             }
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Helpers
-    // -------------------------------------------------------------------------
-
-    private void ClearQueue()
+    private void ClearQueue() { lock (_queueLock) _queue.Clear(); }
+    private static TimeZoneInfo ResolveTimeZone(string id) => TimeZoneInfo.FindSystemTimeZoneById(string.IsNullOrWhiteSpace(id) ? "UTC" : id);
+    private static DateTimeOffset GetLocalNow(VacationConfig cfg) => TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, ResolveTimeZone(cfg.TimeZone));
+    private static DateTimeOffset LocalBoundary(DateTime local, TimeZoneInfo tz)
     {
-        while (_queue.TryDequeue(out _)) { }
+        var unspecified = DateTime.SpecifyKind(local, DateTimeKind.Unspecified);
+        if (tz.IsInvalidTime(unspecified)) unspecified = unspecified.AddHours(1);
+        return new DateTimeOffset(unspecified, tz.GetUtcOffset(unspecified));
     }
 }
