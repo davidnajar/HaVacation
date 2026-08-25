@@ -6,7 +6,7 @@ HaVacation makes your home look occupied while you're away by replaying Home Ass
 
 When installed as a Home Assistant add-on, HaVacation uses the Supervisor API automatically. You do not need to create a Long-Lived Access Token. Runtime configuration is stored persistently under `/data/havacation.json`.
 
-The timezone defaults to `auto`: HaVacation reads Home Assistant's configured `time_zone`, so replay times follow the same local timezone and DST rules as Home Assistant.
+The timezone defaults to `auto`: HaVacation reads Home Assistant's configured `time_zone` from Core, so replay times follow the same local timezone and DST rules as Home Assistant.
 
 ### Home Assistant entities
 
