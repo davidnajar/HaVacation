@@ -80,7 +80,7 @@ public sealed class MqttDiscoveryBridge : BackgroundService
         var device = new { identifiers = new[] { "havacation" }, name = "HaVacation", manufacturer = "HaVacation" };
         await PublishAsync("homeassistant/switch/havacation/vacation_mode/config", JsonSerializer.Serialize(new
         {
-            name = "Vacation Mode", unique_id = "havacation_vacation_mode",
+            name = "Vacation Mode", object_id = "havacation_vacation_mode", unique_id = "havacation_vacation_mode",
             command_topic = "havacation/vacation_mode/set", state_topic = "havacation/vacation_mode/state",
             payload_on = "ON", payload_off = "OFF", icon = "mdi:beach", device
         }), true, ct);
