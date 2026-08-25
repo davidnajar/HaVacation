@@ -18,8 +18,8 @@ boot: auto
 
 homeassistant_api: true
 
-# MQTT is optional. When a broker service exists, HaVacation publishes a
-# controllable Vacation Mode switch and a Next Event sensor via MQTT Discovery.
+# MQTT is optional. If a broker service exists, MQTT Discovery adds a
+# controllable Vacation Mode switch. Core replay works without MQTT.
 services:
   - mqtt:want
 
@@ -33,7 +33,6 @@ ports:
 ports_description:
   8080/tcp: "HaVacation web UI (direct access, optional)"
 
-# Runtime settings are managed by the HaVacation UI and persisted under /data.
 options: {}
 schema: {}
 
