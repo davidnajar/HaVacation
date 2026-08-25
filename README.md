@@ -18,16 +18,7 @@ Only events that would still happen later today are shown. This makes it possibl
 
 The included list defines which entities HaVacation may replay. Exclusions always win over the included list.
 
-You can exclude exact entity IDs, for example:
-
-- `switch.fridge`
-- `media_player.living_room_tv`
-
-You can also exclude groups using shell-like patterns:
-
-- `media_player.*`
-- `switch.fridge_*`
-- `light.guest_?`
+Exact exclusions can target entities such as `switch.fridge` or `media_player.living_room_tv`. Pattern exclusions can target groups such as `media_player.*`, `switch.fridge_*` or `light.guest_?`.
 
 `*` matches any sequence of characters and `?` matches a single character. Excluded entities are filtered before history is requested and are also checked again before events are planned.
 
