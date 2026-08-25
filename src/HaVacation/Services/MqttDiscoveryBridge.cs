@@ -1,7 +1,6 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
 using MQTTnet;
-using MQTTnet.Client;
 
 namespace HaVacation.Services;
 
