@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using HaVacation.Models;
 
 namespace HaVacation.Services;
@@ -24,6 +25,9 @@ public sealed class VacationWorker : BackgroundService
         lock (_queueLock) return [.. _queue.UnorderedItems.Select(x => x.Element).OrderBy(x => x.FireAt)];
     }
 
+    public async Task<IReadOnlyList<ScheduledReplay>> BuildPreviewAsync(VacationConfig config, CancellationToken ct = default)
+        => await BuildPlanAsync(config, ct);
+
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
         await LoadScheduleForTodayAsync(ct);
@@ -47,7 +51,7 @@ public sealed class VacationWorker : BackgroundService
     {
         var cfg = _config.GetVacationConfig();
         ClearQueue();
-        if (!cfg.Enabled || cfg.Entities.Count == 0)
+        if (!cfg.Enabled)
         {
             Interlocked.Increment(ref _scheduleVersion);
             await PublishStatusAsync(ct);
@@ -56,22 +60,9 @@ public sealed class VacationWorker : BackgroundService
 
         try
         {
-            var tz = await ResolveTimeZoneAsync(cfg, ct);
-            var localNow = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, tz);
-            var referenceDate = localNow.Date.AddDays(-cfg.LookbackDays);
-            var from = LocalBoundary(referenceDate, tz);
-            var to = LocalBoundary(referenceDate.AddDays(1), tz);
-            var history = await _ha.GetHistoryAsync(cfg.Entities, from, to, ct);
-
-            foreach (var entry in history)
+            foreach (var replay in await BuildPlanAsync(cfg, ct))
             {
-                var historicalLocal = TimeZoneInfo.ConvertTime(entry.LastChanged, tz);
-                var targetLocal = localNow.Date + historicalLocal.TimeOfDay;
-                var fireAt = LocalBoundary(targetLocal, tz).AddSeconds(Random.Shared.Next(-cfg.RandomJitterSeconds, cfg.RandomJitterSeconds + 1));
-                var fireAtLocal = TimeZoneInfo.ConvertTime(fireAt, tz);
-                if (fireAtLocal <= localNow) continue;
-                var replay = new ScheduledReplay { EntityId = entry.EntityId, State = entry.State, Attributes = entry.Attributes, FireAt = fireAtLocal };
-                lock (_queueLock) _queue.Enqueue(replay, fireAtLocal);
+                lock (_queueLock) _queue.Enqueue(replay, replay.FireAt);
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -83,6 +74,63 @@ public sealed class VacationWorker : BackgroundService
             Interlocked.Increment(ref _scheduleVersion);
             await PublishStatusAsync(ct);
         }
+    }
+
+    private async Task<IReadOnlyList<ScheduledReplay>> BuildPlanAsync(VacationConfig cfg, CancellationToken ct)
+    {
+        var includedEntities = cfg.Entities
+            .Where(entity => !IsExcluded(entity, cfg))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (includedEntities.Count == 0) return [];
+
+        var tz = await ResolveTimeZoneAsync(cfg, ct);
+        var localNow = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, tz);
+        var referenceDate = localNow.Date.AddDays(-cfg.LookbackDays);
+        var from = LocalBoundary(referenceDate, tz);
+        var to = LocalBoundary(referenceDate.AddDays(1), tz);
+        var history = await _ha.GetHistoryAsync(includedEntities, from, to, ct);
+        var result = new List<ScheduledReplay>();
+
+        foreach (var entry in history)
+        {
+            if (IsExcluded(entry.EntityId, cfg)) continue;
+
+            var historicalLocal = TimeZoneInfo.ConvertTime(entry.LastChanged, tz);
+            var targetLocal = localNow.Date + historicalLocal.TimeOfDay;
+            var fireAt = LocalBoundary(targetLocal, tz)
+                .AddSeconds(Random.Shared.Next(-cfg.RandomJitterSeconds, cfg.RandomJitterSeconds + 1));
+            var fireAtLocal = TimeZoneInfo.ConvertTime(fireAt, tz);
+
+            if (fireAtLocal <= localNow) continue;
+
+            result.Add(new ScheduledReplay
+            {
+                EntityId = entry.EntityId,
+                State = entry.State,
+                Attributes = entry.Attributes,
+                FireAt = fireAtLocal
+            });
+        }
+
+        return [.. result.OrderBy(x => x.FireAt)];
+    }
+
+    private static bool IsExcluded(string entityId, VacationConfig cfg)
+    {
+        if (cfg.ExcludedEntities.Contains(entityId, StringComparer.OrdinalIgnoreCase)) return true;
+
+        foreach (var pattern in cfg.ExcludedPatterns.Where(p => !string.IsNullOrWhiteSpace(p)))
+        {
+            var regex = "^" + Regex.Escape(pattern.Trim())
+                .Replace("\\*", ".*")
+                .Replace("\\?", ".") + "$";
+            if (Regex.IsMatch(entityId, regex, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+                return true;
+        }
+
+        return false;
     }
 
     private async Task FireDueEventsAsync(DateTimeOffset now, CancellationToken ct)
@@ -97,7 +145,13 @@ public sealed class VacationWorker : BackgroundService
             }
             try
             {
-                await _ha.ReplayStateAsync(new EntityStateEntry { EntityId = replay!.EntityId, State = replay.State, Attributes = replay.Attributes, LastChanged = replay.FireAt }, ct);
+                await _ha.ReplayStateAsync(new EntityStateEntry
+                {
+                    EntityId = replay!.EntityId,
+                    State = replay.State,
+                    Attributes = replay.Attributes,
+                    LastChanged = replay.FireAt
+                }, ct);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
