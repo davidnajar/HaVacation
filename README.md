@@ -4,26 +4,21 @@ HaVacation makes your home look occupied while you're away by replaying Home Ass
 
 ## Home Assistant add-on
 
-When installed as a Home Assistant add-on, HaVacation uses the Supervisor API automatically. You do not need to create a Long-Lived Access Token. Runtime configuration is stored persistently under `/data/havacation.json` and is included with the add-on's data.
+When installed as a Home Assistant add-on, HaVacation uses the Supervisor API automatically. You do not need to create a Long-Lived Access Token. Runtime configuration is stored persistently under `/data/havacation.json`.
 
 The timezone defaults to `auto`: HaVacation reads Home Assistant's configured `time_zone`, so replay times follow the same local timezone and DST rules as Home Assistant.
 
 ### Home Assistant entities
 
-HaVacation always publishes `sensor.havacation_next_event` through the Home Assistant Core API. Its state describes the next replay, with `entity_id`, `action`, `scheduled_at`, and `vacation_mode` attributes.
+HaVacation publishes `sensor.havacation_next_event` directly through the Home Assistant Core API. Its state describes the next replay, with `entity_id`, `action`, `scheduled_at`, and `vacation_mode` attributes.
 
-If an MQTT broker service is available to the add-on, HaVacation additionally uses MQTT Discovery to expose:
-
-- `switch.havacation_vacation_mode` — enables/disables vacation mode from Home Assistant.
-- `sensor.havacation_next_event` / MQTT discovered Next Event sensor — shows what HaVacation plans to do next.
-
-MQTT is optional; replay functionality does not depend on it.
+If an MQTT broker service is available, HaVacation also uses MQTT Discovery to expose a real controllable Vacation Mode switch. MQTT is optional; replay functionality does not depend on it.
 
 ## Automations
 
 House-wide arrival/departure actions belong in Home Assistant automations rather than inside HaVacation. This keeps HaVacation focused on presence simulation while Home Assistant remains the orchestration layer.
 
-For example, use `switch.havacation_vacation_mode` as an automation trigger. When it turns on you can disable a TV smart plug, set a refrigerator vacation mode, change climate presets, arm an alarm, or perform any other Home Assistant action. A second automation can restore the desired state when vacation mode turns off.
+Use the HaVacation Vacation Mode switch as an automation trigger. When it turns on you can disable a TV smart plug, set a refrigerator vacation mode, change climate presets, arm an alarm, or perform any other Home Assistant action. A second automation can restore the desired state when vacation mode turns off.
 
 Example:
 
