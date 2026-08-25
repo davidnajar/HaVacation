@@ -43,19 +43,29 @@ public sealed class ConfigurationService
                 LookbackDays = int.TryParse(Environment.GetEnvironmentVariable("Vacation__LookbackDays"), out var days) ? days : 7,
                 RandomJitterSeconds = int.TryParse(Environment.GetEnvironmentVariable("Vacation__RandomJitterSeconds"), out var jitter) ? jitter : 120,
                 TimeZone = Environment.GetEnvironmentVariable("Vacation__TimeZone") ?? "auto",
-                Entities = (Environment.GetEnvironmentVariable("Vacation__Entities") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList()
+                Entities = SplitCsv("Vacation__Entities"),
+                ExcludedEntities = SplitCsv("Vacation__ExcludedEntities"),
+                ExcludedPatterns = SplitCsv("Vacation__ExcludedPatterns")
             }
         };
     }
 
+    private static List<string> SplitCsv(string name) =>
+        (Environment.GetEnvironmentVariable(name) ?? "")
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
+
     public HomeAssistantConfig GetHomeAssistantConfig() => new() { Url = _config.HomeAssistant.Url, Token = _config.HomeAssistant.Token };
+
     public VacationConfig GetVacationConfig() => new()
     {
         Enabled = _config.Vacation.Enabled,
         LookbackDays = _config.Vacation.LookbackDays,
         RandomJitterSeconds = _config.Vacation.RandomJitterSeconds,
         TimeZone = string.IsNullOrWhiteSpace(_config.Vacation.TimeZone) ? "auto" : _config.Vacation.TimeZone,
-        Entities = [.. _config.Vacation.Entities]
+        Entities = [.. _config.Vacation.Entities],
+        ExcludedEntities = [.. _config.Vacation.ExcludedEntities],
+        ExcludedPatterns = [.. _config.Vacation.ExcludedPatterns]
     };
 
     public async Task SaveAsync(HomeAssistantConfig ha, VacationConfig vacation)
@@ -65,7 +75,9 @@ public sealed class ConfigurationService
         {
             vacation.LookbackDays = Math.Clamp(vacation.LookbackDays, 1, 365);
             vacation.RandomJitterSeconds = Math.Clamp(vacation.RandomJitterSeconds, 0, 3600);
-            vacation.Entities = vacation.Entities.Select(e => e.Trim()).Where(e => !string.IsNullOrWhiteSpace(e)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            vacation.Entities = Normalize(vacation.Entities);
+            vacation.ExcludedEntities = Normalize(vacation.ExcludedEntities);
+            vacation.ExcludedPatterns = Normalize(vacation.ExcludedPatterns);
             vacation.TimeZone = string.IsNullOrWhiteSpace(vacation.TimeZone) ? "auto" : vacation.TimeZone.Trim();
             if (!vacation.TimeZone.Equals("auto", StringComparison.OrdinalIgnoreCase))
                 _ = TimeZoneInfo.FindSystemTimeZoneById(vacation.TimeZone);
@@ -73,8 +85,18 @@ public sealed class ConfigurationService
             _config = new PersistedConfig
             {
                 HomeAssistant = new() { Url = ha.Url.Trim(), Token = ha.Token.Trim() },
-                Vacation = new() { Enabled = vacation.Enabled, LookbackDays = vacation.LookbackDays, RandomJitterSeconds = vacation.RandomJitterSeconds, TimeZone = vacation.TimeZone, Entities = [.. vacation.Entities] }
+                Vacation = new()
+                {
+                    Enabled = vacation.Enabled,
+                    LookbackDays = vacation.LookbackDays,
+                    RandomJitterSeconds = vacation.RandomJitterSeconds,
+                    TimeZone = vacation.TimeZone,
+                    Entities = [.. vacation.Entities],
+                    ExcludedEntities = [.. vacation.ExcludedEntities],
+                    ExcludedPatterns = [.. vacation.ExcludedPatterns]
+                }
             };
+
             var tmp = _path + ".tmp";
             await File.WriteAllTextAsync(tmp, JsonSerializer.Serialize(_config, JsonOptions));
             File.Move(tmp, _path, true);
@@ -82,4 +104,10 @@ public sealed class ConfigurationService
         }
         finally { _gate.Release(); }
     }
+
+    private static List<string> Normalize(IEnumerable<string> values) => values
+        .Select(e => e.Trim())
+        .Where(e => !string.IsNullOrWhiteSpace(e))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToList();
 }
