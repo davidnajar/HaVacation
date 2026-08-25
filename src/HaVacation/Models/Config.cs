@@ -12,7 +12,8 @@ public sealed class VacationConfig
     public bool Enabled { get; set; }
     public int LookbackDays { get; set; } = 7;
     public int RandomJitterSeconds { get; set; } = 120;
-    public string TimeZone { get; set; } = "Europe/Madrid";
+    // "auto" asks Home Assistant for its configured time_zone.
+    public string TimeZone { get; set; } = "auto";
     public List<string> Entities { get; set; } = [];
 }
 
