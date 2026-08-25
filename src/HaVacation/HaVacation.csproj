@@ -6,4 +6,7 @@
     <RootNamespace>HaVacation</RootNamespace>
     <AssemblyName>HaVacation</AssemblyName>
   </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="MQTTnet" Version="5.2.0.1603" />
+  </ItemGroup>
 </Project>
